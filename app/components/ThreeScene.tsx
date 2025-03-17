@@ -4,6 +4,7 @@ import { useRef, useEffect, useState } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, Grid, Html } from '@react-three/drei';
 import * as THREE from 'three';
+import useWebSocket from '../hooks/useWebSocket';
 
 // Define a custom intersection type to handle nullable fields
 interface CustomIntersection {
@@ -62,10 +63,11 @@ const IntersectionMarker = ({ position }: { position: THREE.Vector3 }) => {
 const MouseIntersection = () => {
     const { camera, scene } = useThree();
     const [intersection, setIntersection] = useState<CustomIntersection | null>(null);
-    const [debugInfo, setDebugInfo] = useState<string>("");
     const raycaster = useRef(new THREE.Raycaster());
     const mouse = useRef(new THREE.Vector2());
     const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const { sendIntersectionUpdate, lastAcknowledgement } = useWebSocket();
+    const [serverAckStatus, setServerAckStatus] = useState<string>("");
 
     // Get all meshes that should be interactive
     const getInteractiveMeshes = () => {
@@ -82,6 +84,14 @@ const MouseIntersection = () => {
         return meshes;
     };
 
+    // Update server ack status when we receive an acknowledgement
+    useEffect(() => {
+        if (lastAcknowledgement) {
+            const timeDiff = Date.now() - lastAcknowledgement.timestamp;
+            setServerAckStatus(`Server ack: ${timeDiff}ms ago`);
+        }
+    }, [lastAcknowledgement]);
+
     useEffect(() => {
         const handleMouseMove = (event: MouseEvent) => {
             // Calculate mouse position in normalized device coordinates
@@ -97,24 +107,21 @@ const MouseIntersection = () => {
             // Check for intersections with our interactive objects
             const meshIntersects = raycaster.current.intersectObjects(interactiveMeshes, false);
 
-            // For debugging - show all intersections
-            const allIntersects = raycaster.current.intersectObjects(scene.children, true);
-            if (allIntersects.length > 0) {
-                const firstObj = allIntersects[0].object;
-                setDebugInfo(`First hit: ${firstObj.type}, name: ${firstObj.name || 'unnamed'}, isMarker: ${!!firstObj.userData.isMarker}`);
-            } else {
-                setDebugInfo("No intersections");
-            }
+            let groundIntersectionPoint: THREE.Vector3 | null = null;
 
             if (meshIntersects.length > 0) {
                 // We found an intersection with one of our interactive objects
                 setIntersection(meshIntersects[0] as CustomIntersection);
+
+                // Send the object intersection to the server
+                sendIntersectionUpdate(meshIntersects[0], null);
             } else {
                 // No object intersection, try the ground plane
                 const intersectionPoint = new THREE.Vector3();
                 const didIntersect = raycaster.current.ray.intersectPlane(groundPlane, intersectionPoint);
 
                 if (didIntersect) {
+                    groundIntersectionPoint = intersectionPoint.clone();
                     setIntersection({
                         distance: camera.position.distanceTo(intersectionPoint),
                         point: intersectionPoint,
@@ -125,15 +132,21 @@ const MouseIntersection = () => {
                         uv: null,
                         uv2: null
                     });
+
+                    // Send the ground intersection to the server
+                    sendIntersectionUpdate(null, groundIntersectionPoint);
                 } else {
                     setIntersection(null);
+
+                    // Send no intersection to the server
+                    sendIntersectionUpdate(null, null);
                 }
             }
         };
 
         window.addEventListener('mousemove', handleMouseMove);
         return () => window.removeEventListener('mousemove', handleMouseMove);
-    }, [camera, scene]);
+    }, [camera, scene, sendIntersectionUpdate]);
 
     return (
         <>
@@ -157,7 +170,7 @@ const MouseIntersection = () => {
                         {intersection.object.userData?.type && (
                             <div>Object: {intersection.object.userData.type}</div>
                         )}
-                        <div style={{ fontSize: '10px', opacity: 0.7 }}>{debugInfo}</div>
+                        <div style={{ fontSize: '10px', color: '#00ff00' }}>{serverAckStatus}</div>
                     </div>
                 )}
             </Html>
@@ -189,8 +202,90 @@ const CameraController = () => {
 };
 
 const ThreeScene = () => {
+    const { serverStatus, lastPong, sendPing, lastAcknowledgement } = useWebSocket();
+    const [lastAckTime, setLastAckTime] = useState<string>('None');
+
+    // Update the last acknowledgement time
+    useEffect(() => {
+        if (lastAcknowledgement) {
+            setLastAckTime(new Date(lastAcknowledgement.timestamp).toLocaleTimeString());
+        }
+    }, [lastAcknowledgement]);
+
+    // Send a ping every 5 seconds to keep the connection alive
+    useEffect(() => {
+        const pingInterval = setInterval(() => {
+            sendPing();
+        }, 5000);
+
+        return () => clearInterval(pingInterval);
+    }, [sendPing]);
+
     return (
         <div style={{ width: '100vw', height: '100vh', position: 'fixed', top: 0, left: 0 }}>
+            {/* WebSocket Status Indicator */}
+            <div style={{
+                position: 'absolute',
+                top: '10px',
+                right: '10px',
+                backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                color: 'white',
+                padding: '10px',
+                borderRadius: '5px',
+                zIndex: 1000,
+                fontFamily: 'monospace',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '5px',
+                minWidth: '250px'
+            }}>
+                <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    borderBottom: '1px solid rgba(255,255,255,0.3)',
+                    paddingBottom: '5px'
+                }}>
+                    <span style={{ fontWeight: 'bold' }}>Server Status</span>
+                    <span style={{
+                        backgroundColor: serverStatus.connected ? 'rgba(0, 128, 0, 0.7)' : 'rgba(255, 0, 0, 0.7)',
+                        padding: '2px 6px',
+                        borderRadius: '3px',
+                        fontSize: '12px'
+                    }}>
+                        {serverStatus.connected ? 'CONNECTED' : 'DISCONNECTED'}
+                    </span>
+                </div>
+
+                <div>{serverStatus.message}</div>
+
+                <div style={{ fontSize: '12px', opacity: 0.8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>Last Pong:</span>
+                        <span>{lastPong ? new Date(lastPong.timestamp).toLocaleTimeString() : 'None'}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>Last Intersection Ack:</span>
+                        <span>{lastAckTime}</span>
+                    </div>
+                </div>
+
+                <button
+                    onClick={sendPing}
+                    style={{
+                        backgroundColor: '#333',
+                        border: 'none',
+                        color: 'white',
+                        padding: '5px 10px',
+                        borderRadius: '3px',
+                        cursor: 'pointer',
+                        marginTop: '5px'
+                    }}
+                >
+                    Send Ping
+                </button>
+            </div>
+
             <Canvas camera={{ position: [30, 30, 30], fov: 50 }}>
                 <ambientLight intensity={0.5} />
                 <directionalLight position={[10, 10, 5]} intensity={1} />
