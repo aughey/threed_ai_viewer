@@ -14,6 +14,27 @@ const PORT = process.env.PORT || 3001;
 // Store the current intersection state for each client
 const clientIntersectionState = new Map();
 
+// Define the initial scene state with default objects
+const sceneState = {
+    objects: [
+        {
+            id: 'box1',
+            type: 'box',
+            position: [0, 5, 0],
+            size: [10, 10, 10],
+            color: 'red'
+        },
+        {
+            id: 'sphere1',
+            type: 'sphere',
+            position: [15, 5, 15],
+            radius: 5,
+            segments: [32, 32],
+            color: 'blue'
+        }
+    ]
+};
+
 io.on('connection', (socket) => {
     console.log('Client connected:', socket.id);
 
@@ -22,6 +43,10 @@ io.on('connection', (socket) => {
 
     // Send a welcome message to the client
     socket.emit('serverStatus', { connected: true, message: 'Connected to server' });
+
+    // Send the current scene state to the newly connected client
+    socket.emit('sceneState', sceneState);
+    console.log(`Sent scene state to client ${socket.id}`);
 
     // Handle ping messages
     socket.on('ping', (data) => {
