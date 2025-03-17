@@ -4,7 +4,7 @@ import { useRef, useEffect, useState } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, Grid, Html } from '@react-three/drei';
 import * as THREE from 'three';
-import useWebSocket from '../hooks/useWebSocket';
+import useWebSocket, { SceneObject as SceneObjectType } from '../hooks/useWebSocket';
 
 // Define a custom intersection type to handle nullable fields
 interface CustomIntersection {
@@ -18,26 +18,35 @@ interface CustomIntersection {
     uv2: THREE.Vector2 | null;
 }
 
-const Box = () => {
+// Dynamic object component that renders based on object type
+const SceneObject = ({ object }: { object: SceneObjectType }) => {
     const meshRef = useRef<THREE.Mesh>(null);
 
-    return (
-        <mesh ref={meshRef} position={[0, 5, 0]} userData={{ type: 'box' }}>
-            <boxGeometry args={[10, 10, 10]} />
-            <meshStandardMaterial color="red" />
-        </mesh>
-    );
-};
+    if (object.type === 'box') {
+        return (
+            <mesh
+                ref={meshRef}
+                position={object.position}
+                userData={{ type: object.type, id: object.id }}
+            >
+                <boxGeometry args={object.size} />
+                <meshStandardMaterial color={object.color} />
+            </mesh>
+        );
+    } else if (object.type === 'sphere') {
+        return (
+            <mesh
+                ref={meshRef}
+                position={object.position}
+                userData={{ type: object.type, id: object.id }}
+            >
+                <sphereGeometry args={[object.radius as number, object.segments?.[0] || 32, object.segments?.[1] || 32]} />
+                <meshStandardMaterial color={object.color} />
+            </mesh>
+        );
+    }
 
-const Sphere = () => {
-    const meshRef = useRef<THREE.Mesh>(null);
-
-    return (
-        <mesh ref={meshRef} position={[15, 5, 15]} userData={{ type: 'sphere' }}>
-            <sphereGeometry args={[5, 32, 32]} />
-            <meshStandardMaterial color="blue" />
-        </mesh>
-    );
+    return null;
 };
 
 const IntersectionMarker = ({ position }: { position: THREE.Vector3 }) => {
@@ -201,8 +210,21 @@ const CameraController = () => {
     return <OrbitControls ref={controlsRef} enablePan={true} enableZoom={true} enableRotate={true} />;
 };
 
+// Scene component that renders objects from server state
+const SceneFromServer = () => {
+    const { sceneState } = useWebSocket();
+
+    return (
+        <>
+            {sceneState.objects.map((object) => (
+                <SceneObject key={object.id} object={object} />
+            ))}
+        </>
+    );
+};
+
 const ThreeScene = () => {
-    const { serverStatus, lastPong, sendPing, lastAcknowledgement } = useWebSocket();
+    const { serverStatus, lastPong, sendPing, lastAcknowledgement, sceneState } = useWebSocket();
     const [lastAckTime, setLastAckTime] = useState<string>('None');
 
     // Update the last acknowledgement time
@@ -248,45 +270,20 @@ const ThreeScene = () => {
                 }}>
                     <span style={{ fontWeight: 'bold' }}>Server Status</span>
                     <span style={{
-                        backgroundColor: serverStatus.connected ? 'rgba(0, 128, 0, 0.7)' : 'rgba(255, 0, 0, 0.7)',
-                        padding: '2px 6px',
-                        borderRadius: '3px',
-                        fontSize: '12px'
-                    }}>
-                        {serverStatus.connected ? 'CONNECTED' : 'DISCONNECTED'}
-                    </span>
+                        width: '10px',
+                        height: '10px',
+                        borderRadius: '50%',
+                        backgroundColor: serverStatus.connected ? '#00ff00' : '#ff0000'
+                    }}></span>
                 </div>
-
-                <div>{serverStatus.message}</div>
-
-                <div style={{ fontSize: '12px', opacity: 0.8 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span>Last Pong:</span>
-                        <span>{lastPong ? new Date(lastPong.timestamp).toLocaleTimeString() : 'None'}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span>Last Intersection Ack:</span>
-                        <span>{lastAckTime}</span>
-                    </div>
-                </div>
-
-                <button
-                    onClick={sendPing}
-                    style={{
-                        backgroundColor: '#333',
-                        border: 'none',
-                        color: 'white',
-                        padding: '5px 10px',
-                        borderRadius: '3px',
-                        cursor: 'pointer',
-                        marginTop: '5px'
-                    }}
-                >
-                    Send Ping
-                </button>
+                <div style={{ fontSize: '12px' }}>{serverStatus.message}</div>
+                <div style={{ fontSize: '12px' }}>Last Ping: {lastPong ? `${Date.now() - lastPong.timestamp}ms ago` : 'None'}</div>
+                <div style={{ fontSize: '12px' }}>Last Ack: {lastAckTime}</div>
+                <div style={{ fontSize: '12px' }}>Objects: {sceneState.objects.length}</div>
             </div>
 
             <Canvas camera={{ position: [30, 30, 30], fov: 50 }}>
+                <CameraController />
                 <ambientLight intensity={0.5} />
                 <directionalLight position={[10, 10, 5]} intensity={1} />
                 <Grid
@@ -305,9 +302,10 @@ const ThreeScene = () => {
                     renderOrder={-1}
                     side={THREE.DoubleSide}
                 />
-                <Box />
-                <Sphere />
-                <CameraController />
+
+                {/* Render objects from server state */}
+                <SceneFromServer />
+
                 <MouseIntersection />
             </Canvas>
         </div>

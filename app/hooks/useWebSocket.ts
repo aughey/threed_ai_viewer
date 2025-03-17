@@ -19,6 +19,24 @@ interface IntersectionAcknowledgement {
     timestamp: number;
 }
 
+// Define the scene object types
+export interface SceneObject {
+    id: string;
+    type: string;
+    position: [number, number, number];
+    color: string;
+    // Box specific properties
+    size?: [number, number, number];
+    // Sphere specific properties
+    radius?: number;
+    segments?: [number, number];
+}
+
+// Define the scene state
+export interface SceneState {
+    objects: SceneObject[];
+}
+
 // Define the intersection data types
 export interface IntersectionData {
     type: 'none' | 'ground' | 'object';
@@ -36,6 +54,7 @@ export const useWebSocket = () => {
     });
     const [lastPong, setLastPong] = useState<PongResponse | null>(null);
     const [lastAcknowledgement, setLastAcknowledgement] = useState<IntersectionAcknowledgement | null>(null);
+    const [sceneState, setSceneState] = useState<SceneState>({ objects: [] });
 
     // Initialize socket connection
     useEffect(() => {
@@ -64,6 +83,12 @@ export const useWebSocket = () => {
 
         socketInstance.on('intersectionAcknowledged', (ack: IntersectionAcknowledgement) => {
             setLastAcknowledgement(ack);
+        });
+
+        // Handle receiving scene state from server
+        socketInstance.on('sceneState', (state: SceneState) => {
+            console.log('Received scene state from server:', state);
+            setSceneState(state);
         });
 
         // Save socket instance
@@ -128,6 +153,7 @@ export const useWebSocket = () => {
         serverStatus,
         lastPong,
         lastAcknowledgement,
+        sceneState,
         sendPing,
         sendIntersectionUpdate
     };
