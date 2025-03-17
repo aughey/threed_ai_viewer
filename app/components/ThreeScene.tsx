@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useEffect, useState } from 'react';
-import { Canvas, useThree, useFrame } from '@react-three/fiber';
+import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, Grid, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import useWebSocket, { SceneObject as SceneObjectType } from '../hooks/useWebSocket';
@@ -188,7 +188,7 @@ const MouseIntersection = () => {
 };
 
 const CameraController = () => {
-    const { camera, gl } = useThree();
+    const { camera } = useThree();
     const controlsRef = useRef<any>(null);
 
     useEffect(() => {

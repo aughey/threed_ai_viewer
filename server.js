@@ -1,5 +1,5 @@
 const express = require('express');
-const { McpServer, ResourceTemplate } = require('@modelcontextprotocol/sdk/server/mcp.js');
+const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { SSEServerTransport } = require('@modelcontextprotocol/sdk/server/sse.js');
 const { z } = require('zod');
 
@@ -44,7 +44,7 @@ app.use((req, res, next) => {
 });
 
 // Handle CORS preflight requests
-app.options('*', (req, res) => {
+app.options('*', (_req, res) => {
     res.status(200).end();
 });
 
@@ -90,16 +90,6 @@ function setScene(newState) {
 
     // Return the updated state
     return sceneState;
-}
-
-function addObject(object) {
-    // Create a new state with the added object
-    const newState = {
-        objects: [...sceneState.objects, object]
-    };
-
-    // Update and broadcast
-    return setScene(newState);
 }
 
 function addObjects(objectsToAdd) {
@@ -164,53 +154,10 @@ mcpServer.resource(
     })
 );
 
-// MCP Tools
-mcpServer.tool(
-    "add-object",
-    {
-        type: z.enum(['box', 'sphere']),
-        id: z.string(),
-        position: z.array(z.number()).length(3),
-        color: z.string(),
-        // For box
-        size: z.array(z.number()).length(3).optional(),
-        // For sphere
-        radius: z.number().optional(),
-        segments: z.array(z.number()).length(2).optional()
-    },
-    async (params) => {
-        const { type, id } = params;
-
-        // Check if object with this ID already exists
-        const existingIndex = sceneState.objects.findIndex(obj => obj.id === id);
-        if (existingIndex >= 0) {
-            return {
-                content: [{
-                    type: "text",
-                    text: `Error: Object with ID "${id}" already exists`
-                }],
-                isError: true
-            };
-        }
-
-        // Create new object based on type
-        const newObject = { ...params };
-
-        // Add to scene state using our state management function
-        addObject(newObject);
-
-        return {
-            content: [{
-                type: "text",
-                text: `Successfully added ${type} with ID "${id}"`
-            }]
-        };
-    }
-);
-
 // New tool to add multiple objects at once
 mcpServer.tool(
     "add-objects",
+    "Adds multiple objects to the scene",
     {
         objects: z.array(
             z.object({
@@ -262,6 +209,7 @@ mcpServer.tool(
 
 mcpServer.tool(
     "remove-objects",
+    "Removes multiple objects from the scene",
     {
         ids: z.array(z.string())
     },
@@ -294,6 +242,7 @@ mcpServer.tool(
 
 mcpServer.tool(
     "update-objects",
+    "Updates multiple objects in the scene",
     {
         objects: z.array(
             z.object({
@@ -340,6 +289,7 @@ mcpServer.tool(
 
 mcpServer.tool(
     "get-all-objects",
+    "Gets all objects in the scene",
     {},
     async () => {
         return {
@@ -354,6 +304,7 @@ mcpServer.tool(
 // New tool to get pointer intersection information
 mcpServer.tool(
     "get-pointer",
+    "Gets pointer intersection information",
     {},
     async () => {
         // Return the latest intersection state
@@ -384,7 +335,7 @@ mcpServer.tool(
 );
 
 // Regular Express routes for WebSocket clients
-app.get('/api/status', (req, res) => {
+app.get('/api/status', (_req, res) => {
     res.json({
         status: 'online',
         latestClientId: latestClientId,
@@ -396,7 +347,7 @@ app.get('/api/status', (req, res) => {
 const transports = new Map();
 
 // Set up MCP SSE endpoint
-app.get("/mcp/sse", async (req, res) => {
+app.get("/mcp/sse", async (_req, res) => {
     // Use the session ID from middleware
     // const sessionId = req.sessionId;
     res.setHeader('Content-Type', 'text/event-stream');
@@ -448,7 +399,7 @@ app.post("/mcp/messages", async (req, res) => {
         // console.log("handling post message");
         // console.log(req.body);
         // console.log(req.query);
-        const foo = await transport.handlePostMessage(req, res, req.body);
+        await transport.handlePostMessage(req, res, req.body);
     } catch (error) {
         console.error(`Error handling MCP message: ${error.message}`);
         res.status(500).json({
@@ -481,7 +432,7 @@ io.on('connection', (socket) => {
     console.log(`Sent scene state to client ${socket.id}`);
 
     // Handle ping messages
-    socket.on('ping', (data) => {
+    socket.on('ping', (_data) => {
         socket.emit('pong', { timestamp: Date.now(), message: 'Server pong response' });
     });
 
