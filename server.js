@@ -157,7 +157,7 @@ mcpServer.resource(
 // New tool to add multiple objects at once
 mcpServer.tool(
     "add-objects",
-    "Adds multiple objects to the scene",
+    "Adds multiple objects to the scene, you must define the type, id, position (array of 3 numbers), color.  radius for spheres, size for boxes (array of 3 numbers).",
     {
         objects: z.array(
             z.object({
@@ -174,6 +174,7 @@ mcpServer.tool(
         )
     },
     async (params) => {
+        console.log('[DEBUG] add-objects tool called with params:', JSON.stringify(params, null, 2));
         const { objects } = params;
 
         // Validate that none of the object IDs already exist
@@ -186,24 +187,28 @@ mcpServer.tool(
         }
 
         if (existingIds.length > 0) {
-            return {
+            const response = {
                 content: [{
                     type: "text",
                     text: `Error: Objects with IDs "${existingIds.join('", "')}" already exist`
                 }],
                 isError: true
             };
+            console.log('[DEBUG] add-objects error response:', JSON.stringify(response, null, 2));
+            return response;
         }
 
         // Add all objects to the scene state
         addObjects(objects);
 
-        return {
+        const response = {
             content: [{
                 type: "text",
                 text: `Successfully added ${objects.length} objects to the scene`
             }]
         };
+        console.log('[DEBUG] add-objects success response:', JSON.stringify(response, null, 2));
+        return response;
     }
 );
 
@@ -292,12 +297,14 @@ mcpServer.tool(
     "Gets all objects in the scene",
     {},
     async () => {
-        return {
+        const response = {
             content: [{
                 type: "text",
                 text: JSON.stringify(sceneState.objects, null, 2)
             }]
         };
+        console.log('[DEBUG] get-all-objects response:', JSON.stringify(response, null, 2));
+        return response;
     }
 );
 
@@ -348,60 +355,58 @@ const transports = new Map();
 
 // Set up MCP SSE endpoint
 app.get("/mcp/sse", async (_req, res) => {
-    // Use the session ID from middleware
-    // const sessionId = req.sessionId;
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
     const transport = new SSEServerTransport("/mcp/messages", res);
+    const sessionId = transport.sessionId;
 
-    const sessionId = transport.sessionId
+    console.log('[DEBUG] New SSE connection:', {
+        sessionId,
+        headers: res.getHeaders(),
+        timestamp: new Date().toISOString()
+    });
 
-    console.log(`New SSE connection established with session ID: ${sessionId}`);
-
-    // Store the transport with its session ID
     transports.set(sessionId, transport);
-
-    // Log all active session IDs for debugging
-    console.log(`Active sessions: ${Array.from(transports.keys()).join(', ')}`);
+    console.log(`[DEBUG] Active sessions: ${Array.from(transports.keys()).join(', ')}`);
 
     try {
         await mcpServer.connect(transport);
     } catch (error) {
-        console.error(`Error connecting to MCP server: ${error.message}`);
+        console.error('[DEBUG] SSE connection error:', error);
         res.end();
     }
 });
 
 // Set up MCP message endpoint
 app.post("/mcp/messages", async (req, res) => {
-    // Use the session ID from middleware
     const sessionId = req.sessionId;
+    console.log('[DEBUG] Received MCP message:', {
+        sessionId,
+        body: req.body,
+        query: req.query,
+        timestamp: new Date().toISOString()
+    });
 
-    // console.log(`Received message for session ID: ${sessionId}`);
-    // console.log(`Available session IDs: ${Array.from(transports.keys()).join(', ')}`);
-
-    // Get the transport for this session ID
     let transport = transports.get(sessionId);
 
     if (!transport) {
-        console.error(`No active transport found`);
-        return res.status(400).json({
+        const errorResponse = {
             error: "No active MCP connection for this session",
             message: "Please establish an SSE connection first",
             providedSessionId: sessionId,
             availableSessions: Array.from(transports.keys())
-        });
+        };
+        console.log('[DEBUG] MCP message error:', errorResponse);
+        return res.status(400).json(errorResponse);
     }
 
     try {
-        // console.log("handling post message");
-        // console.log(req.body);
-        // console.log(req.query);
         await transport.handlePostMessage(req, res, req.body);
+        console.log('[DEBUG] MCP message handled successfully');
     } catch (error) {
-        console.error(`Error handling MCP message: ${error.message}`);
+        console.error('[DEBUG] Error handling MCP message:', error);
         res.status(500).json({
             error: "Internal server error",
             message: error.message
